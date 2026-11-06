@@ -1,0 +1,200 @@
+{
+  "name": "small",
+  "buffer": 15,
+  "apron_penalty": 1000000.0,
+  "apron_walk_dist": 1500,
+  "flights": [
+    {
+      "id": "F001",
+      "arrival": 345,
+      "departure": 390,
+      "aircraft_size": "M",
+      "pax": 133
+    },
+    {
+      "id": "F002",
+      "arrival": 445,
+      "departure": 500,
+      "aircraft_size": "M",
+      "pax": 182
+    },
+    {
+      "id": "F003",
+      "arrival": 480,
+      "departure": 525,
+      "aircraft_size": "M",
+      "pax": 190
+    },
+    {
+      "id": "F004",
+      "arrival": 530,
+      "departure": 590,
+      "aircraft_size": "L",
+      "pax": 222
+    },
+    {
+      "id": "F005",
+      "arrival": 570,
+      "departure": 620,
+      "aircraft_size": "M",
+      "pax": 123
+    },
+    {
+      "id": "F006",
+      "arrival": 630,
+      "departure": 725,
+      "aircraft_size": "L",
+      "pax": 347
+    },
+    {
+      "id": "F007",
+      "arrival": 735,
+      "departure": 795,
+      "aircraft_size": "M",
+      "pax": 166
+    },
+    {
+      "id": "F008",
+      "arrival": 840,
+      "departure": 960,
+      "aircraft_size": "L",
+      "pax": 349
+    },
+    {
+      "id": "F009",
+      "arrival": 895,
+      "departure": 945,
+      "aircraft_size": "M",
+      "pax": 148
+    },
+    {
+      "id": "F010",
+      "arrival": 980,
+      "departure": 1045,
+      "aircraft_size": "L",
+      "pax": 313
+    },
+    {
+      "id": "F011",
+      "arrival": 1010,
+      "departure": 1070,
+      "aircraft_size": "M",
+      "pax": 120
+    },
+    {
+      "id": "F012",
+      "arrival": 1030,
+      "departure": 1080,
+      "aircraft_size": "M",
+      "pax": 176
+    },
+    {
+      "id": "F013",
+      "arrival": 1095,
+      "departure": 1145,
+      "aircraft_size": "S",
+      "pax": 86
+    },
+    {
+      "id": "F014",
+      "arrival": 1100,
+      "departure": 1160,
+      "aircraft_size": "L",
+      "pax": 276
+    },
+    {
+      "id": "F015",
+      "arrival": 1180,
+      "departure": 1275,
+      "aircraft_size": "L",
+      "pax": 228
+    },
+    {
+      "id": "F016",
+      "arrival": 1205,
+      "departure": 1310,
+      "aircraft_size": "L",
+      "pax": 304
+    },
+    {
+      "id": "F017",
+      "arrival": 1230,
+      "departure": 1260,
+      "aircraft_size": "S",
+      "pax": 71
+    },
+    {
+      "id": "F018",
+      "arrival": 1245,
+      "departure": 1310,
+      "aircraft_size": "M",
+      "pax": 170
+    },
+    {
+      "id": "F019",
+      "arrival": 1300,
+      "departure": 1350,
+      "aircraft_size": "M",
+      "pax": 132
+    },
+    {
+      "id": "F020",
+      "arrival": 1330,
+      "departure": 1400,
+      "aircraft_size": "M",
+      "pax": 185
+    }
+  ],
+  "gates": [
+    {
+      "id": "G01",
+      "max_size": "S",
+      "walk_dist": 110
+    },
+    {
+      "id": "G02",
+      "max_size": "S",
+      "walk_dist": 131
+    },
+    {
+      "id": "G03",
+      "max_size": "S",
+      "walk_dist": 168
+    },
+    {
+      "id": "G04",
+      "max_size": "S",
+      "walk_dist": 220
+    },
+    {
+      "id": "G05",
+      "max_size": "M",
+      "walk_dist": 245
+    },
+    {
+      "id": "G06",
+      "max_size": "M",
+      "walk_dist": 313
+    },
+    {
+      "id": "G07",
+      "max_size": "L",
+      "walk_dist": 351
+    },
+    {
+      "id": "G08",
+      "max_size": "M",
+      "walk_dist": 377
+    },
+    {
+      "id": "G09",
+      "max_size": "L",
+      "walk_dist": 418
+    },
+    {
+      "id": "G10",
+      "max_size": "M",
+      "walk_dist": 464
+    }
+  ]
+}
