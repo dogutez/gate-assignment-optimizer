@@ -7,4 +7,5 @@ __pycache__/
 # Secrets and local state
 .env
 *.db
+*.db-*
 *.sqlite3

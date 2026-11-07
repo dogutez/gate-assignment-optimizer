@@ -5,8 +5,9 @@ Run with:  python -m app.worker
 
 import argparse
 import logging
+import signal
 import sqlite3
-import time
+import threading
 
 from app import jobs
 from app.logging_conf import current_job_id, setup_logging
@@ -92,7 +93,13 @@ def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         logger.exception("job failed", extra={"error_type": type(exc).__name__, "error": str(exc)})
 
 
-def run_forever(db_path: str, poll_interval_s: float) -> None:
+def run_forever(db_path: str, poll_interval_s: float, stop: threading.Event) -> None:
+    """Poll for jobs until `stop` is set.
+
+    The stop flag is only checked between jobs: a running HiGHS solve cannot be
+    interrupted from Python. If the process is killed mid-solve, the job stays
+    'running' and is requeued when the worker starts again.
+    """
     conn = jobs.connect(db_path)
     jobs.init_db(conn)
     requeued = jobs.requeue_running_jobs(conn)
@@ -100,10 +107,13 @@ def run_forever(db_path: str, poll_interval_s: float) -> None:
         logger.warning("requeued interrupted jobs", extra={"count": requeued})
     logger.info("worker started", extra={"db_path": db_path, "poll_interval_s": poll_interval_s})
 
-    while True:
+    while not stop.is_set():
         found = process_one(conn)
         if not found:
-            time.sleep(poll_interval_s)  # queue empty: wait before asking again
+            # Queue empty: wait before asking again. Returns early if stop is set.
+            stop.wait(poll_interval_s)
+    conn.close()
+    logger.info("worker stopped")
 
 
 def main() -> None:
@@ -113,10 +123,16 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
-    try:
-        run_forever(args.db, args.poll_interval)
-    except KeyboardInterrupt:
-        logger.info("worker stopped")
+    stop = threading.Event()
+
+    def request_stop(signum, frame):
+        logger.info("stop requested", extra={"signal": signal.Signals(signum).name})
+        stop.set()
+
+    # SIGTERM is what `docker stop` sends; SIGINT is Ctrl+C.
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    run_forever(args.db, args.poll_interval, stop)
 
 
 if __name__ == "__main__":
