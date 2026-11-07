@@ -1,5 +1,7 @@
 # Gate Assignment Optimizer
 
+[![CI](https://github.com/dogutez/gate-assignment-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/dogutez/gate-assignment-optimizer/actions/workflows/ci.yml)
+
 Assigns flights to airport gates with a Mixed-Integer Program (Pyomo + HiGHS) and serves
 it through a REST API with background solve jobs.
 

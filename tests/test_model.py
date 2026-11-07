@@ -129,9 +129,10 @@ def test_fuller_flight_gets_the_gate():
 
 
 def test_time_limit_returns_feasible_solution_with_gap():
-    # large needs ~30 s to optimality; with 1 s HiGHS must stop and keep its best solution.
+    # large needs ~30 s to optimality; with 3 s HiGHS must stop and keep its best solution.
+    # (Locally a first solution exists after ~1 s; 3 s leaves room for slower CI runners.)
     inst = load("large")
-    result = solve(inst, time_limit_s=1)
+    result = solve(inst, time_limit_s=3)
     assert result.termination == "maxTimeLimit"
     assert result.status == "feasible"
     assert result.mip_gap > 0
