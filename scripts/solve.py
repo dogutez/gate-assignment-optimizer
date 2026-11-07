@@ -8,6 +8,7 @@ Usage (run from the repo root):
 import argparse
 from pathlib import Path
 
+from app.checker import find_violations, total_cost
 from app.model import compute_kpis, solve
 from app.schemas import APRON, Instance
 
@@ -63,6 +64,15 @@ def main() -> None:
         f"({kpis.avg_walk_per_pax_m:.0f} m per passenger)"
     )
     print(f"utilization  : {kpis.gate_utilization:.1%}")
+
+    problems = find_violations(instance, result.assignment)
+    recomputed = total_cost(instance, result.assignment)
+    print(
+        f"checker      : {'OK' if not problems else f'{len(problems)} violations'}, "
+        f"recomputed cost {recomputed:,.0f}"
+    )
+    for problem in problems:
+        print(f"  - {problem}")
     if args.show:
         print_schedule(instance, result.assignment)
 
