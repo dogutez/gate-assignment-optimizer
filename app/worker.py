@@ -9,10 +9,12 @@ import sqlite3
 import time
 
 from app import jobs
+from app.logging_conf import current_job_id, setup_logging
 from app.model import compute_kpis, solve
 from app.schemas import GateAssignment, JobRequest, JobResult
 
-logger = logging.getLogger(__name__)
+# Fixed name: under "python -m app.worker" __name__ would be "__main__".
+logger = logging.getLogger("app.worker")
 
 
 def process_one(conn: sqlite3.Connection) -> bool:
@@ -21,8 +23,25 @@ def process_one(conn: sqlite3.Connection) -> bool:
     if row is None:
         return False
 
+    # Every log line written while this job runs (also inside app.model) gets its job_id.
+    token = current_job_id.set(row["id"])
+    try:
+        run_job(conn, row)
+    finally:
+        current_job_id.reset(token)
+    return True
+
+
+def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
     job_id = row["id"]
-    logger.info("job started", extra={"job_id": job_id})
+    logger.info(
+        "job started",
+        extra={
+            "instance_name": row["instance_name"],
+            "n_flights": row["n_flights"],
+            "n_gates": row["n_gates"],
+        },
+    )
     try:
         request = JobRequest.model_validate_json(row["request_json"])
         options = request.options
@@ -30,24 +49,28 @@ def process_one(conn: sqlite3.Connection) -> bool:
 
         if result.status == "no_solution":
             # Only possible if the time limit hits before HiGHS finds any solution.
+            error = (
+                f"no feasible solution found within the time limit of {options.time_limit_s} s "
+                f"(solver termination: {result.termination})"
+            )
             jobs.mark_failed(
                 conn,
                 job_id,
-                f"no feasible solution found within the time limit of {options.time_limit_s} s "
-                f"(solver termination: {result.termination})",
+                error,
                 solver_status=result.status,
                 termination=result.termination,
                 solve_time_s=result.solve_time_s,
             )
-            logger.warning("job failed: no solution", extra={"job_id": job_id})
-            return True
+            logger.warning("job failed", extra={"error_type": "NoSolution", "error": error})
+            return
 
+        kpis = compute_kpis(request.instance, result.assignment)
         job_result = JobResult(
             job_id=job_id,
             assignments=[
                 GateAssignment(flight_id=f, gate_id=g) for f, g in result.assignment.items()
             ],
-            kpis=compute_kpis(request.instance, result.assignment),
+            kpis=kpis,
         )
         jobs.mark_succeeded(
             conn,
@@ -59,12 +82,14 @@ def process_one(conn: sqlite3.Connection) -> bool:
             solve_time_s=result.solve_time_s,
             result=job_result,
         )
-        logger.info("job succeeded", extra={"job_id": job_id})
+        logger.info(
+            "job succeeded",
+            extra={"apron_count": kpis.apron_count, "solver_status": result.status},
+        )
     except Exception as exc:
         # Any bug or bad data must fail this job, not crash the worker.
         jobs.mark_failed(conn, job_id, f"{type(exc).__name__}: {exc}")
-        logger.exception("job failed", extra={"job_id": job_id})
-    return True
+        logger.exception("job failed", extra={"error_type": type(exc).__name__, "error": str(exc)})
 
 
 def run_forever(db_path: str, poll_interval_s: float) -> None:
@@ -72,8 +97,8 @@ def run_forever(db_path: str, poll_interval_s: float) -> None:
     jobs.init_db(conn)
     requeued = jobs.requeue_running_jobs(conn)
     if requeued:
-        logger.warning("requeued %d interrupted job(s)", requeued)
-    logger.info("worker started, polling %s", db_path)
+        logger.warning("requeued interrupted jobs", extra={"count": requeued})
+    logger.info("worker started", extra={"db_path": db_path, "poll_interval_s": poll_interval_s})
 
     while True:
         found = process_one(conn)
@@ -87,7 +112,7 @@ def main() -> None:
     parser.add_argument("--poll-interval", type=float, default=1.0, help="seconds")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)  # replaced by JSON logging in a later phase
+    setup_logging()
     try:
         run_forever(args.db, args.poll_interval)
     except KeyboardInterrupt:

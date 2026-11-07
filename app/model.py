@@ -10,6 +10,7 @@ FG holds only compatible (flight, gate) pairs, so incompatible assignments
 have no variable at all instead of a constraint forcing them to zero.
 """
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -19,6 +20,8 @@ from pyomo.contrib.solver.common.results import SolutionStatus
 from pyomo.contrib.solver.solvers.highs import Highs
 
 from app.schemas import APRON, SIZE_RANK, Flight, Gate, Instance, Kpis
+
+logger = logging.getLogger(__name__)
 
 Formulation = Literal["pairwise", "clique"]
 
@@ -191,6 +194,16 @@ def solve(
     start = time.perf_counter()
     m = build_model(instance, formulation)
     build_time = time.perf_counter() - start
+    n_variables, n_constraints = count_variables(m), count_constraints(m)
+    logger.info(
+        "model built",
+        extra={
+            "formulation": formulation,
+            "n_variables": n_variables,
+            "n_constraints": n_constraints,
+            "build_time_s": round(build_time, 3),
+        },
+    )
 
     start = time.perf_counter()
     results = Highs().solve(
@@ -202,38 +215,43 @@ def solve(
     )
     solve_time = time.perf_counter() - start
 
-    common = dict(
+    result = SolveResult(
+        status="no_solution",
         termination=results.termination_condition.name,
-        n_variables=count_variables(m),
-        n_constraints=count_constraints(m),
+        objective=None,
+        best_bound=None,
+        mip_gap=None,
+        assignment={},
+        n_variables=n_variables,
+        n_constraints=n_constraints,
         build_time_s=build_time,
         solve_time_s=solve_time,
     )
-
-    if results.solution_status not in (SolutionStatus.optimal, SolutionStatus.feasible):
-        return SolveResult(
-            status="no_solution",
-            objective=None,
-            best_bound=None,
-            mip_gap=None,
-            assignment={},
-            **common,
+    if results.solution_status in (SolutionStatus.optimal, SolutionStatus.feasible):
+        results.solution_loader.load_vars()
+        result.status = (
+            "optimal" if results.solution_status == SolutionStatus.optimal else "feasible"
         )
+        result.objective = results.incumbent_objective / OBJECTIVE_SCALE
+        if results.objective_bound is not None:
+            result.best_bound = results.objective_bound / OBJECTIVE_SCALE
+            result.mip_gap = abs(result.objective - result.best_bound) / max(
+                abs(result.objective), 1e-9
+            )
+        result.assignment = extract_assignment(m)
 
-    results.solution_loader.load_vars()
-    objective = results.incumbent_objective / OBJECTIVE_SCALE
-    bound = (
-        results.objective_bound / OBJECTIVE_SCALE if results.objective_bound is not None else None
+    logger.info(
+        "solve finished",
+        extra={
+            "status": result.status,
+            "termination": result.termination,
+            "objective": result.objective,
+            "mip_gap": result.mip_gap,
+            "solve_time_s": round(solve_time, 3),
+            "time_limit_s": time_limit_s,
+        },
     )
-    gap = abs(objective - bound) / max(abs(objective), 1e-9) if bound is not None else None
-    return SolveResult(
-        status="optimal" if results.solution_status == SolutionStatus.optimal else "feasible",
-        objective=objective,
-        best_bound=bound,
-        mip_gap=gap,
-        assignment=extract_assignment(m),
-        **common,
-    )
+    return result
 
 
 def compute_kpis(instance: Instance, assignment: dict[str, str]) -> Kpis:

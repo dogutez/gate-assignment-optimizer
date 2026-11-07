@@ -3,7 +3,7 @@
 Assigns flights to airport gates with a Mixed-Integer Program (Pyomo + HiGHS) and serves
 it through a REST API with background solve jobs.
 
-> Work in progress: model, benchmark and job API are done; logging, Docker and CI come next.
+> Work in progress: model, benchmark, job API and logging are done; Docker and CI come next.
 
 ## Development setup
 
@@ -21,8 +21,8 @@ uv run ruff check . && uv run ruff format --check .
 The API stores jobs in SQLite and returns immediately; a separate worker process solves them.
 
 ```bash
-uv run uvicorn app.api:app --host 127.0.0.1 --port 8000   # terminal 1
-uv run python -m app.worker                                # terminal 2
+uv run python -m app.api --host 127.0.0.1 --port 8000   # terminal 1
+uv run python -m app.worker                             # terminal 2
 ```
 
 Both use `JOBS_DB_PATH` (default `jobs.db`). Interactive docs: http://127.0.0.1:8000/docs
@@ -38,6 +38,21 @@ Both use `JOBS_DB_PATH` (default `jobs.db`). Interactive docs: http://127.0.0.1:
 If the time limit is reached with a feasible solution, the job succeeds with
 `solver_status: "feasible"` and the remaining `mip_gap`. If no solution was found, it fails
 with the reason in `error`.
+
+## Logging
+
+API and worker write one JSON object per line to stdout (uvicorn's own lines included).
+Every line written while a job is handled carries its `job_id`, also lines from the model
+code, which knows nothing about jobs: the worker stores the id in a `ContextVar` and a log
+filter adds it to each record. Level is set with `LOG_LEVEL` (default `INFO`).
+
+```json
+{"time": "...", "level": "INFO", "logger": "app.model", "event": "model built", "formulation": "clique", "n_variables": 2262, "n_constraints": 1358, "build_time_s": 0.059, "job_id": "1403136465a04a318758bd4761f8176c"}
+{"time": "...", "level": "INFO", "logger": "app.model", "event": "solve finished", "status": "optimal", "termination": "convergenceCriteriaSatisfied", "objective": 14158944.0, "mip_gap": 0.0, "solve_time_s": 0.288, "time_limit_s": 60.0, "job_id": "1403136465a04a318758bd4761f8176c"}
+```
+
+Events: `job submitted`, `job started`, `model built`, `solve finished`, `job succeeded`,
+`job failed` (with `error_type`, `error` and `traceback`).
 
 ## Instances
 

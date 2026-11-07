@@ -1,17 +1,24 @@
 """REST API. It never solves anything itself: it stores jobs and reads their state.
 
-Run with:  uvicorn app.api:app --host 127.0.0.1 --port 8000
+Run with:  python -m app.api --host 127.0.0.1 --port 8000
 """
 
+import argparse
+import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 
 from app import jobs
+from app.logging_conf import setup_logging
 from app.schemas import JobInfo, JobRequest, JobResult, JobSubmitted
+
+# Fixed name: under "python -m app.api" __name__ would be "__main__".
+logger = logging.getLogger("app.api")
 
 
 @asynccontextmanager
@@ -59,6 +66,17 @@ def health() -> dict[str, str]:
 def submit_job(request: JobRequest, conn: Db, response: Response) -> JobSubmitted:
     # Invalid bodies never get here: FastAPI validates JobRequest and answers 422.
     job_id = jobs.create_job(conn, request)
+    logger.info(
+        "job submitted",
+        extra={
+            "job_id": job_id,
+            "instance_name": request.instance.name,
+            "n_flights": len(request.instance.flights),
+            "n_gates": len(request.instance.gates),
+            "time_limit_s": request.options.time_limit_s,
+            "mip_gap": request.options.mip_gap,
+        },
+    )
     response.headers["Location"] = f"/jobs/{job_id}"
     return JobSubmitted(job_id=job_id, status="queued")
 
@@ -81,3 +99,19 @@ def get_result(job_id: str, conn: Db) -> JobResult:
     if row["status"] != "succeeded":
         raise HTTPException(status.HTTP_409_CONFLICT, f"job is {row['status']}, no result yet")
     return jobs.to_job_result(row)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Gate assignment API server.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    setup_logging()
+    # log_config=None: uvicorn keeps its loggers unconfigured, so its lines (startup,
+    # access log) go through our JSON handler too.
+    uvicorn.run(app, host=args.host, port=args.port, log_config=None)
+
+
+if __name__ == "__main__":
+    main()
