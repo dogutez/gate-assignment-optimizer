@@ -3,7 +3,7 @@
 Assigns flights to airport gates with a Mixed-Integer Program (Pyomo + HiGHS) and serves
 it through a REST API with background solve jobs.
 
-> Work in progress: model, benchmark, job API and logging are done; Docker and CI come next.
+> Work in progress: model, API, logging and Docker are done; CI and final docs come next.
 
 ## Development setup
 
@@ -15,6 +15,30 @@ uv run python -m data.generate   # regenerate data/instances/{small,medium,large
 uv run pytest                # run tests
 uv run ruff check . && uv run ruff format --check .
 ```
+
+## Quick start with Docker
+
+```bash
+git clone https://github.com/dogutez/gate-assignment-optimizer.git
+cd gate-assignment-optimizer
+docker compose up --build          # API on http://127.0.0.1:8000, plus one worker
+```
+
+Submit the large instance and poll it:
+
+```bash
+python3 -c "import json; print(json.dumps({'instance': json.load(open('data/instances/large.json')), 'options': {'time_limit_s': 120}}))" > request.json
+curl -s -X POST http://127.0.0.1:8000/jobs -H "Content-Type: application/json" -d @request.json
+# {"job_id":"<id>","status":"queued"}
+curl -s http://127.0.0.1:8000/jobs/<id>          # status, objective, gap
+curl -s http://127.0.0.1:8000/jobs/<id>/result   # assignments + KPIs
+```
+
+- `api` and `worker` run from the same image and share one SQLite file on the `jobs-data` volume.
+- The port is published on `127.0.0.1` only; use `API_PORT=8010 docker compose up` if 8000 is taken.
+- `docker stop` sends SIGTERM: the worker finishes its current step and exits. If it is
+  killed during a solve, the job is put back in the queue when the worker starts again.
+- v1 runs a single worker (requeue-on-start assumes it); see "Possible extensions".
 
 ## Running the API locally
 
