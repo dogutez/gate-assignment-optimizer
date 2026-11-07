@@ -3,7 +3,7 @@
 Assigns flights to airport gates with a Mixed-Integer Program (Pyomo + HiGHS) and serves
 it through a REST API with background solve jobs.
 
-> Work in progress: model and benchmark are done; the API, Docker setup and CI come next.
+> Work in progress: model, benchmark and job API are done; logging, Docker and CI come next.
 
 ## Development setup
 
@@ -15,6 +15,29 @@ uv run python -m data.generate   # regenerate data/instances/{small,medium,large
 uv run pytest                # run tests
 uv run ruff check . && uv run ruff format --check .
 ```
+
+## Running the API locally
+
+The API stores jobs in SQLite and returns immediately; a separate worker process solves them.
+
+```bash
+uv run uvicorn app.api:app --host 127.0.0.1 --port 8000   # terminal 1
+uv run python -m app.worker                                # terminal 2
+```
+
+Both use `JOBS_DB_PATH` (default `jobs.db`). Interactive docs: http://127.0.0.1:8000/docs
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/jobs` | Submit `{"instance": ..., "options": {"time_limit_s": 60, "mip_gap": 0.0001}}`, returns `202` + `job_id` |
+| `GET` | `/jobs/{job_id}` | Status (`queued` / `running` / `succeeded` / `failed`), timestamps, solver status, objective, gap |
+| `GET` | `/jobs/{job_id}/result` | Assignments (`flight_id` -> `gate_id` or `APRON`) and KPIs; `409` until the job has succeeded |
+| `GET` | `/jobs?limit=20` | Most recent jobs |
+
+If the time limit is reached with a feasible solution, the job succeeds with
+`solver_status: "feasible"` and the remaining `mip_gap`. If no solution was found, it fails
+with the reason in `error`.
 
 ## Instances
 

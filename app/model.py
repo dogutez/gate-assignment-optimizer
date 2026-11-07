@@ -18,7 +18,7 @@ import pyomo.environ as pyo
 from pyomo.contrib.solver.common.results import SolutionStatus
 from pyomo.contrib.solver.solvers.highs import Highs
 
-from app.schemas import APRON, SIZE_RANK, Flight, Gate, Instance
+from app.schemas import APRON, SIZE_RANK, Flight, Gate, Instance, Kpis
 
 Formulation = Literal["pairwise", "clique"]
 
@@ -40,15 +40,6 @@ class SolveResult:
     n_constraints: int
     build_time_s: float
     solve_time_s: float
-
-
-@dataclass
-class Kpis:
-    n_flights: int
-    apron_count: int
-    total_walk_pax_m: float  # sum of pax * walking distance over flights at a gate
-    avg_walk_per_pax_m: float
-    gate_utilization: float  # occupied gate-minutes / available gate-minutes
 
 
 def is_compatible(flight: Flight, gate: Gate) -> bool:

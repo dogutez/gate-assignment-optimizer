@@ -126,3 +126,14 @@ def test_fuller_flight_gets_the_gate():
         gates=[gate("G1", walk_dist=400)],
     )
     assert solve(inst).assignment == {"BIG": "G1", "SMALL": APRON}
+
+
+def test_time_limit_returns_feasible_solution_with_gap():
+    # large needs ~30 s to optimality; with 1 s HiGHS must stop and keep its best solution.
+    inst = load("large")
+    result = solve(inst, time_limit_s=1)
+    assert result.termination == "maxTimeLimit"
+    assert result.status == "feasible"
+    assert result.mip_gap > 0
+    assert len(result.assignment) == len(inst.flights)
+    assert result.solve_time_s < 10
