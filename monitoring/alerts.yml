@@ -1,0 +1,24 @@
+# Alert rules, visible at http://127.0.0.1:9090/alerts. Sending notifications
+# (mail, Slack) would need Alertmanager, which is not part of this setup.
+groups:
+  - name: gate-optimizer
+    rules:
+      - alert: ApiDown
+        expr: up{job="gate-optimizer-api"} == 0
+        for: 1m
+        annotations:
+          summary: "Prometheus cannot reach the API's /metrics endpoint."
+
+      # The worker has no HTTP port, so it is watched through the queue: if no worker
+      # is running, the oldest queued job just keeps getting older. 10 minutes leaves
+      # room for jobs waiting behind long solves.
+      - alert: JobQueueStuck
+        expr: gate_optimizer_oldest_queued_job_age_seconds > 600
+        for: 1m
+        annotations:
+          summary: "A job has been queued for over 10 minutes. Is the worker running?"
+
+      - alert: JobsFailing
+        expr: delta(gate_optimizer_jobs{status="failed"}[15m]) > 0
+        annotations:
+          summary: "At least one job failed in the last 15 minutes; see the worker logs."

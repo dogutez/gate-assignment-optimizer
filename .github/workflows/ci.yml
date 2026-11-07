@@ -47,3 +47,9 @@ jobs:
 
       - name: Build image
         run: docker build --tag gate-assignment-optimizer:ci .
+
+      - name: Check Prometheus config and alert rules
+        run: >
+          docker run --rm -v "$PWD/monitoring:/etc/prometheus:ro"
+          --entrypoint promtool prom/prometheus:v3.16.0
+          check config /etc/prometheus/prometheus.yml

@@ -83,6 +83,7 @@ flowchart LR
     A -- "insert job,<br/>read status / result" --> D[("SQLite<br/>jobs table")]
     W["Worker<br/>polling loop"] -- "claim job,<br/>write result" --> D
     W -- "Pyomo model" --> H["HiGHS<br/>MIP solver"]
+    P["Prometheus<br/>(optional)"] -- "GET /metrics" --> A
 ```
 
 A solve can take minutes, so the API does not solve anything. It validates the request,
@@ -193,6 +194,7 @@ Interactive docs (Swagger UI): http://127.0.0.1:8000/docs
 | `GET` | `/jobs/{job_id}` | Status (`queued` / `running` / `succeeded` / `failed`), timestamps, solver status, objective, gap |
 | `GET` | `/jobs/{job_id}/result` | Assignments (`flight_id` → `gate_id` or `APRON`) and KPIs; `409` until the job has succeeded |
 | `GET` | `/jobs?limit=20` | Most recent jobs |
+| `GET` | `/metrics` | Prometheus metrics (see [Monitoring](#monitoring)) |
 
 An instance looks like this (all times in minutes from midnight; `options` is optional):
 
@@ -300,12 +302,12 @@ uv run python -m scripts.baseline
   assigned exactly once, every aircraft fits its gate, consecutive flights at a gate are at
   least `buffer` minutes apart, and the cost recomputed from scratch equals the solver's
   objective. The benchmark runs it on every solution (the "Checker" column).
-- 57 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
+- 61 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
   out, buffer boundary at exactly 15 minutes, fuller flight gets the closer gate), both
   formulations giving the same optimum, the heuristics staying feasible and never beating
   the MIP, the checker catching deliberately broken
   assignments, the time-limit path, input validation, the job lifecycle through the API,
-  worker failure handling and logging.
+  worker failure handling, logging and the metrics output.
 - CI (GitHub Actions) runs `ruff check`, `ruff format --check`, `pytest` and `docker build`
   on every push and pull request, with the exact dependency versions from `uv.lock`.
 
@@ -329,6 +331,41 @@ filter adds it to each record. Level is set with `LOG_LEVEL` (default `INFO`).
 
 Events: `job submitted`, `job started`, `model built`, `solve finished`, `job succeeded`,
 `job failed` (with `error_type`, `error` and `traceback`).
+
+## Monitoring
+
+`GET /metrics` serves metrics in the Prometheus text format, written by hand in
+`app/metrics.py` (no client library needed):
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `gate_optimizer_jobs{status}` | gauge | Jobs currently queued / running / succeeded / failed |
+| `gate_optimizer_oldest_queued_job_age_seconds` | gauge | How long the oldest queued job has been waiting |
+| `gate_optimizer_solve_seconds` | summary | Count and total solver time of succeeded jobs |
+| `gate_optimizer_http_requests_total{method,path,code}` | counter | API requests, by route template (`/jobs/{job_id}`, not every id) |
+
+Job metrics are read from the SQLite table when Prometheus scrapes, so they cover the
+worker too, although the worker has no HTTP port. A stopped worker shows up as a queue
+that keeps getting older.
+
+Start the stack with Prometheus:
+
+```bash
+docker compose --profile monitoring up --build -d
+```
+
+Prometheus runs on http://127.0.0.1:9090 (`PROMETHEUS_PORT` to change it), scrapes the API
+every 15 s and evaluates three alert rules from `monitoring/alerts.yml`:
+
+| Alert | Fires when |
+|---|---|
+| `ApiDown` | `/metrics` cannot be scraped for 1 minute |
+| `JobQueueStuck` | a job has been queued for more than 10 minutes (worker down or overloaded) |
+| `JobsFailing` | a job failed in the last 15 minutes |
+
+Example queries: `gate_optimizer_jobs`, average solve time
+`rate(gate_optimizer_solve_seconds_sum[1h]) / rate(gate_optimizer_solve_seconds_count[1h])`.
+CI checks the config and rules with `promtool`.
 
 ## Local development
 
@@ -358,10 +395,12 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
 | `app/worker.py` | Polling worker with graceful shutdown on SIGTERM |
 | `app/api.py` | FastAPI endpoints |
 | `app/logging_conf.py` | JSON log formatter and `job_id` context |
+| `app/metrics.py` | Prometheus metrics text for `/metrics` |
 | `data/generate.py` | Synthetic instance generator; output in `data/instances/` |
 | `scripts/solve.py`, `scripts/benchmark.py`, `scripts/baseline.py` | Command-line solve, formulation benchmark, heuristic vs MIP |
 | `tests/` | pytest suite |
 | `Dockerfile`, `docker-compose.yml` | One image, two services (`api`, `worker`) |
+| `monitoring/` | Prometheus scrape config and alert rules |
 | `.github/workflows/ci.yml` | Lint, test and image build on every push |
 
 ## Assumptions and limits
@@ -384,6 +423,8 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
 - **Heuristic + MIP together**: offer the heuristic as a `method` option in the API, or pass
   its plan to the solver as a starting solution.
 - **Solver comparison**: the same model in GAMS to compare solvers.
+- **Dashboards and notifications**: a Grafana dashboard on top of Prometheus, and
+  Alertmanager to send the alerts to mail or Slack.
 - **Visual output**: a Gantt chart of the gate schedule as a PNG endpoint.
 
 ## License

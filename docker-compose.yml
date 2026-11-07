@@ -31,6 +31,20 @@ services:
     restart: unless-stopped
     # v1 runs exactly one worker: requeue-on-start assumes no other worker is running.
 
+  # Optional: start with `docker compose --profile monitoring up`.
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   # Shared by api (writes jobs) and worker (writes results): one SQLite file.
   jobs-data:
+  prometheus-data:

@@ -11,9 +11,10 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import PlainTextResponse
 
-from app import jobs
+from app import jobs, metrics
 from app.logging_conf import setup_logging
 from app.schemas import JobInfo, JobRequest, JobResult, JobSubmitted
 
@@ -50,6 +51,16 @@ def get_db() -> Iterator[sqlite3.Connection]:
 Db = Annotated[sqlite3.Connection, Depends(get_db)]
 
 
+@app.middleware("http")
+async def count_requests(request: Request, call_next):
+    response = await call_next(request)
+    # After routing, the scope holds the matched route, e.g. "/jobs/{job_id}".
+    route = request.scope.get("route")
+    path = route.path if route else "unmatched"
+    metrics.http_requests[request.method, path, response.status_code] += 1
+    return response
+
+
 def find_job_or_404(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row:
     row = jobs.get_job(conn, job_id)
     if row is None:
@@ -60,6 +71,12 @@ def find_job_or_404(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def get_metrics(conn: Db) -> PlainTextResponse:
+    """Prometheus scrape endpoint: job counts, queue age, solve time, HTTP requests."""
+    return PlainTextResponse(metrics.render(conn), media_type="text/plain; version=0.0.4")
 
 
 @app.post("/jobs", status_code=status.HTTP_202_ACCEPTED)

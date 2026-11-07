@@ -1,0 +1,13 @@
+# Prometheus scrapes the API's /metrics endpoint. Job metrics come from the shared
+# SQLite table, so the worker is covered too (it has no HTTP port of its own).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: gate-optimizer-api
+    static_configs:
+      - targets: ["api:8000"]
