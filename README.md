@@ -261,15 +261,49 @@ time limit 120 s, median of 3 runs.
   only 22% of all flights are L): 87 L flights (avg. 89 min on ground) share 8 L-capable gates.
   That is a capacity limit of the gate mix, not a model artifact.
 
+### What the MIP adds over a heuristic
+
+`app/heuristic.py` builds a plan the way a planner might, then improves it:
+
+- **Greedy**: flights in arrival order, each to the smallest free gate it fits (keeps
+  wide-body gates for wide-bodies), nearest first; apron if nothing is free.
+- **Local search**: starting from the greedy plan, move a flight to another place or swap
+  two flights whenever that is feasible and lowers the cost, until no such move is left.
+
+```bash
+uv run python -m scripts.baseline
+```
+
+| Instance | Method | Cost (pax·m) | Above MIP | Apron | Avg. walk (m) | Time (s) | Checker |
+|---|---|---|---|---|---|---|---|
+| small | greedy | 1,209,816 | 0.8% | 0 | 309 | 0.00 | OK |
+| small | greedy + local search | 1,200,372 | 0.0% | 0 | 306 | 0.00 | OK |
+| small | MIP (optimal) | 1,200,372 | 0.0% | 0 | 306 | 0.13 | OK |
+| medium | greedy | 14,888,251 | 5.2% | 5 | 406 | 0.00 | OK |
+| medium | greedy + local search | 14,470,116 | 2.2% | 5 | 393 | 0.07 | OK |
+| medium | MIP (optimal) | 14,158,944 | 0.0% | 5 | 380 | 0.20 | OK |
+| large | greedy | 145,986,780 | 6.2% | 90 | 604 | 0.00 | OK |
+| large | greedy + local search | 142,646,420 | 3.8% | 89 | 597 | 0.85 | OK |
+| large | MIP (optimal) | 137,413,483 | 0.0% | 85 | 586 | 29.79 | OK |
+
+- A good rule gets within a few percent. On `large` the MIP still saves 5.2 million
+  passenger-meters over greedy + local search and puts 4 fewer flights on the apron, and
+  it proves that no better plan exists. A heuristic cannot say how far from the optimum it is.
+- The rule matters: "fullest flight first" was 29% above the optimum on `large`
+  (121 apron flights), "arrival order, nearest gate" 16%.
+- The heuristic answers in under a second, which makes it useful for a fast re-plan
+  during the day, or as a fallback if the MIP hits its time limit.
+
 ## Verification
 
 - `app/checker.py` checks a solution **without importing the model code**: every flight is
   assigned exactly once, every aircraft fits its gate, consecutive flights at a gate are at
   least `buffer` minutes apart, and the cost recomputed from scratch equals the solver's
   objective. The benchmark runs it on every solution (the "Checker" column).
-- 50 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
+- 57 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
   out, buffer boundary at exactly 15 minutes, fuller flight gets the closer gate), both
-  formulations giving the same optimum, the checker catching deliberately broken
+  formulations giving the same optimum, the heuristics staying feasible and never beating
+  the MIP, the checker catching deliberately broken
   assignments, the time-limit path, input validation, the job lifecycle through the API,
   worker failure handling and logging.
 - CI (GitHub Actions) runs `ruff check`, `ruff format --check`, `pytest` and `docker build`
@@ -318,13 +352,14 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
 |---|---|
 | `app/schemas.py` | Pydantic models: instance format and API request/response; the single data contract |
 | `app/model.py` | Pyomo model (both formulations), HiGHS solve, KPIs |
+| `app/heuristic.py` | Greedy + local search baseline |
 | `app/checker.py` | Independent solution checker and cost recomputation |
 | `app/jobs.py` | SQLite job store: create, claim, finish, requeue |
 | `app/worker.py` | Polling worker with graceful shutdown on SIGTERM |
 | `app/api.py` | FastAPI endpoints |
 | `app/logging_conf.py` | JSON log formatter and `job_id` context |
 | `data/generate.py` | Synthetic instance generator; output in `data/instances/` |
-| `scripts/solve.py`, `scripts/benchmark.py` | Command-line solve and benchmark table |
+| `scripts/solve.py`, `scripts/benchmark.py`, `scripts/baseline.py` | Command-line solve, formulation benchmark, heuristic vs MIP |
 | `tests/` | pytest suite |
 | `Dockerfile`, `docker-compose.yml` | One image, two services (`api`, `worker`) |
 | `.github/workflows/ci.yml` | Lint, test and image build on every push |
@@ -346,8 +381,9 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
   in between), airline gate preferences, adjacency rules for wide-bodies.
 - **Robustness**: penalize small gaps between consecutive flights at a gate so that a
   delay does not cascade; re-optimize during the day with a warm start from the current plan.
-- **Baselines**: a greedy assignment plus local search to show what the MIP adds, and
-  the same model in GAMS to compare solvers.
+- **Heuristic + MIP together**: offer the heuristic as a `method` option in the API, or pass
+  its plan to the solver as a starting solution.
+- **Solver comparison**: the same model in GAMS to compare solvers.
 - **Visual output**: a Gantt chart of the gate schedule as a PNG endpoint.
 
 ## License
