@@ -12,6 +12,12 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
+[project.optional-dependencies]
+solvers = [
+    "cplex>=22.2.0.1",
+    "gurobipy>=14.0.0",
+]
+
 [dependency-groups]
 dev = [
     "httpx2>=2.16.0",

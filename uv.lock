@@ -52,6 +52,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cplex"
+version = "22.2.0.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/01/8692faab547edc0ed647f9807e8176b41e30ccf7d21e269c25dded1d60a0/cplex-22.2.0.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:94be9d4397cafe5c1caf113c4ba9dd6f9bc44ee66f56eb09581dc8904bb5cff1", size = 38483936, upload-time = "2026-07-15T11:41:18.778Z" },
+    { url = "https://files.pythonhosted.org/packages/58/4b/143b512ce70cbf6db45b1329729f8fafddb7da073dd6a48fa2945f94153e/cplex-22.2.0.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:df6b52cc66e66be89ee7354210aa59e68542131e2db5e46ffda871046667b7ca", size = 45294361, upload-time = "2026-07-15T11:41:21.696Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/31/c933b8f08c2fef863121157f669f7d950807045925dc0c2d024cd479b77c/cplex-22.2.0.1-cp312-cp312-manylinux2014_ppc64le.whl", hash = "sha256:52a296b6c397a9f62d234393d43ddd1f01e6daeb5ced6e72c1f94f38dfeb0585", size = 50944630, upload-time = "2026-07-15T11:41:24.719Z" },
+    { url = "https://files.pythonhosted.org/packages/80/3b/adbf365191519b1a348361f660798b1c841500f7cfbd4888882381ff57f4/cplex-22.2.0.1-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:9b023e288883c3b88dcaac14e5c95f91bf59c400a8920c5fff887785c2f3993c", size = 52215205, upload-time = "2026-07-15T11:41:28.037Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/2d/b2a949e099233dd73a8e09fa836264f5323290ef821497d39cd4dd87347d/cplex-22.2.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:9bad9b108ecc2fde2b1afd2731870e7d412210617a115efe0224f659b906dc19", size = 32684152, upload-time = "2026-07-15T11:41:31.499Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.162.0"
 source = { registry = "https://pypi.org/simple" }
@@ -80,6 +92,12 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+solvers = [
+    { name = "cplex" },
+    { name = "gurobipy" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx2" },
@@ -89,18 +107,32 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cplex", marker = "extra == 'solvers'", specifier = ">=22.2.0.1" },
     { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "gurobipy", marker = "extra == 'solvers'", specifier = ">=14.0.0" },
     { name = "highspy", specifier = ">=1.15.1" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pyomo", specifier = ">=6.10.1" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
+provides-extras = ["solvers"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "ruff", specifier = ">=0.17.4" },
+]
+
+[[package]]
+name = "gurobipy"
+version = "14.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/38/d2b24eaa55c5104377da4f234c89bab0971fbeb0103bcb5df4cea01f77a1/gurobipy-14.0.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:129319220a5633741fcfc1e0f14e291fc8a4ca10445814a4296dddcd9fb220c6", size = 16670023, upload-time = "2026-11-10T13:05:05.958Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/d4/9b4b144c5239cffd042a48d973366e23bbec6904aa1065b7b89d2e75f3c2/gurobipy-14.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d8bd87c024eb5728c1e2e57fed067f9ad95977bf050f295e09ff680e6694c7d5", size = 14167628, upload-time = "2026-11-10T13:05:08.704Z" },
+    { url = "https://files.pythonhosted.org/packages/16/18/9560d2bff30fd80a05ad2cd52c1fa8839d29da97257b65949411c3bd5db0/gurobipy-14.0.0-cp312-cp312-manylinux_2_26_aarch64.whl", hash = "sha256:8d19bfc37151afae56b994b03950251d4f0f387ce3d97846622c9e2b28c7026b", size = 28078892, upload-time = "2026-11-10T13:05:12.317Z" },
+    { url = "https://files.pythonhosted.org/packages/80/04/25f7c38f735c01d011d93883176553b33f0c978b1abc546ea392e8a45e20/gurobipy-14.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:0004295bd83bb60689bb28d71d2a3fe3e8a196fdfe3e3f9bb77fdc541db0f2e7", size = 10380614, upload-time = "2026-11-10T13:05:14.645Z" },
 ]
 
 [[package]]
