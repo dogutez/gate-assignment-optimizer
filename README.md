@@ -2,12 +2,13 @@
 
 [![CI](https://github.com/dogutez/gate-assignment-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/dogutez/gate-assignment-optimizer/actions/workflows/ci.yml)
 
-Assigns a day of flights to airport gates with a Mixed-Integer Program (Pyomo + HiGHS) and
-serves it as a REST API with background solve jobs (FastAPI, SQLite job store, separate worker).
+Assigns a day of flights to airport gates with a Mixed-Integer Program (Pyomo; HiGHS by
+default, Gurobi or CPLEX optional) and serves it as a REST API with background solve jobs
+(FastAPI, SQLite job store, separate worker).
 
 On the largest test day (400 flights, 30 gates, up to 56 aircraft on the ground at once)
-HiGHS proves optimality (gap 0.001%) in about 30 seconds, and every solution is re-checked
-by an independent feasibility checker.
+HiGHS proves optimality (gap 0.001%) in about 30 seconds and Gurobi in about 3 seconds.
+Every solution is re-checked by an independent feasibility checker.
 
 ## The problem
 
@@ -82,7 +83,7 @@ flowchart LR
     C["Client<br/>(curl, any HTTP client)"] -- "POST /jobs<br/>GET /jobs/{id}" --> A["API<br/>FastAPI"]
     A -- "insert job,<br/>read status / result" --> D[("SQLite<br/>jobs table")]
     W["Worker<br/>polling loop"] -- "claim job,<br/>write result" --> D
-    W -- "Pyomo model" --> H["HiGHS<br/>MIP solver"]
+    W -- "Pyomo model" --> H["MIP solver<br/>HiGHS (default),<br/>Gurobi or CPLEX"]
     P["Prometheus<br/>(optional)"] -- "GET /metrics" --> A
 ```
 
@@ -138,19 +139,22 @@ Job status after about 30 seconds:
 
 ```json
 {
-  "job_id": "3665af32e0d34d6ca820c2a9a231f1dc",
+  "job_id": "d538e86c481848238de16ec08d5dca75",
   "status": "succeeded",
   "instance_name": "large",
   "n_flights": 400,
   "n_gates": 30,
-  "created_at": "2026-11-07T15:16:55.789215Z",
-  "started_at": "2026-11-07T15:16:56.276797Z",
-  "finished_at": "2026-11-07T15:17:28.844861Z",
+  "created_at": "2026-11-11T09:16:04.167494Z",
+  "started_at": "2026-11-11T09:16:04.946368Z",
+  "finished_at": "2026-11-11T09:16:35.165009Z",
+  "solver": "highs",
+  "solver_version": "1.15.1",
   "solver_status": "optimal",
   "termination": "convergenceCriteriaSatisfied",
   "objective": 137413483.0,
   "mip_gap": 1.17e-05,
-  "solve_time_s": 32.34,
+  "nodes": 1,
+  "solve_time_s": 29.98,
   "error": null
 }
 ```
@@ -159,7 +163,7 @@ Result (assignments shortened):
 
 ```json
 {
-  "job_id": "3665af32e0d34d6ca820c2a9a231f1dc",
+  "job_id": "d538e86c481848238de16ec08d5dca75",
   "assignments": [
     {"flight_id": "F001", "gate_id": "G12"},
     {"flight_id": "F002", "gate_id": "G02"},
@@ -240,29 +244,61 @@ follow a morning and an evening peak; the aircraft mix is 30% S, 50% M, 20% L.
 The large instance is deliberately congested: at peak times there are more aircraft than
 gates, so some flights must go to the apron.
 
+The same Pyomo model is solved with three solvers, both no-overlap formulations:
+
 ```bash
-uv run python -m scripts.benchmark --repeat 3
+uv sync --extra solvers                                   # Gurobi and CPLEX (optional)
+uv run python -m scripts.benchmark --solver all --repeat 3
 ```
 
-Environment: HiGHS 1.15.1, Pyomo 6.10.1, Python 3.12.16, AMD Ryzen 7 3700U (laptop CPU),
-time limit 120 s, median of 3 runs.
+Environment: HiGHS 1.15.1, Gurobi 14.0.0 (academic license), CPLEX 22.2.0.0 (free Community
+Edition), Pyomo 6.10.1, Python 3.12.16, AMD Ryzen 7 3700U (laptop CPU, 8 threads), each
+solver with its default thread count, time limit 120 s, median of 3 runs.
 
-| Instance | Flights | Gates | Formulation | Variables | Constraints | Build (s) | Solve (s) | Status | MIP gap | Apron | Checker |
+| Solver | Instance | Formulation | Variables | Constraints | Build (s) | Solve (s) | Status | MIP gap | Nodes | Apron | Checker |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| small | 20 | 10 | clique | 120 | 62 | 0.00 | 0.02 | optimal | 0.000% | 0 | OK |
-| small | 20 | 10 | pairwise | 120 | 78 | 0.00 | 0.02 | optimal | 0.000% | 0 | OK |
-| medium | 150 | 20 | clique | 2,262 | 1,358 | 0.07 | 0.18 | optimal | 0.000% | 5 | OK |
-| medium | 150 | 20 | pairwise | 2,262 | 16,340 | 0.16 | 0.63 | optimal | 0.000% | 5 | OK |
-| large | 400 | 30 | clique | 8,476 | 4,580 | 0.23 | 29.68 | optimal | 0.001% | 85 | OK |
-| large | 400 | 30 | pairwise | 8,476 | 193,688 | 1.79 | 38.20 | optimal | 0.002% | 85 | OK |
+| HiGHS 1.15.1 | small | clique | 120 | 62 | 0.00 | 0.02 | optimal | 0.000% | 1 | 0 | OK |
+| HiGHS 1.15.1 | small | pairwise | 120 | 78 | 0.00 | 0.02 | optimal | 0.000% | 1 | 0 | OK |
+| HiGHS 1.15.1 | medium | clique | 2,262 | 1,358 | 0.07 | 0.21 | optimal | 0.000% | 1 | 5 | OK |
+| HiGHS 1.15.1 | medium | pairwise | 2,262 | 16,340 | 0.15 | 0.66 | optimal | 0.000% | 1 | 5 | OK |
+| HiGHS 1.15.1 | large | clique | 8,476 | 4,580 | 0.21 | 30.34 | optimal | 0.001% | 1 | 85 | OK |
+| HiGHS 1.15.1 | large | pairwise | 8,476 | 193,688 | 1.92 | 38.52 | optimal | 0.002% | 1 | 85 | OK |
+| Gurobi 14.0.0 | small | clique | 120 | 62 | 0.00 | 0.02 | optimal | 0.000% | 1 | 0 | OK |
+| Gurobi 14.0.0 | small | pairwise | 120 | 78 | 0.00 | 0.02 | optimal | 0.000% | 1 | 0 | OK |
+| Gurobi 14.0.0 | medium | clique | 2,262 | 1,358 | 0.05 | 0.21 | optimal | 0.000% | 1 | 5 | OK |
+| Gurobi 14.0.0 | medium | pairwise | 2,262 | 16,340 | 0.21 | 1.12 | optimal | 0.000% | 1 | 5 | OK |
+| Gurobi 14.0.0 | large | clique | 8,476 | 4,580 | 0.27 | 3.27 | optimal | 0.002% | 1 | 85 | OK |
+| Gurobi 14.0.0 | large | pairwise | 8,476 | 193,688 | 2.05 | 15.20 | optimal | 0.002% | 1 | 85 | OK |
+| CPLEX 22.2.0.0 | small | clique | 120 | 62 | 0.00 | 0.02 | optimal | 0.000% | 0 | 0 | OK |
+| CPLEX 22.2.0.0 | small | pairwise | 120 | 78 | 0.00 | 0.02 | optimal | 0.000% | 0 | 0 | OK |
+| CPLEX 22.2.0.0 | medium | clique | 2,262 | 1,358 | - | - | license size limit | - | - | - | - |
+| CPLEX 22.2.0.0 | medium | pairwise | 2,262 | 16,340 | - | - | license size limit | - | - | - | - |
+| CPLEX 22.2.0.0 | large | clique | 8,476 | 4,580 | - | - | license size limit | - | - | - | - |
+| CPLEX 22.2.0.0 | large | pairwise | 8,476 | 193,688 | - | - | license size limit | - | - | - | - |
 
-- Both formulations reach the same optimum. On `large` the clique form needs 42x fewer
-  constraints, builds 8x faster and solves about 20% faster.
+- **All solvers agree.** Wherever a solver ran, it reached the same optimum (large:
+  137,413,483 pax·m, 85 flights at the apron), and the checker accepted every solution.
+- **Gurobi is 9x faster on `large`** (3.3 s vs 30.3 s with the clique form). This is not
+  parallelism: with `--threads 1` Gurobi needs 3.4 s and HiGHS 30.9 s. Both solvers close
+  the gap at the root node (1 node), so the difference is the root work, not branching:
+  presolve, cutting planes and primal heuristics that find the optimal plan and prove it
+  early. On `small` and `medium` there is nothing to win; both answer in well under a second.
+- **The formulation matters more for Gurobi.** The clique form has 42x fewer constraints
+  than the pairwise form. HiGHS solves it about 20% faster, Gurobi 4.6x faster (3.3 s vs
+  15.2 s). Building the pairwise model also takes about 8x longer.
+- **Objective scaling is a HiGHS problem.** The objective is about $10^8$ passenger-meters.
+  Passed to HiGHS unscaled, the solver stayed at the root node and still had a 14% gap on
+  `large` after 60 s; symmetry, cut and presolve options did not help. Scaled to
+  passenger-kilometers it is optimal in about 30 s. Gurobi does not care: unscaled
+  (`--objective-scale 1`) it is optimal in 3.7 s. The model keeps the scaling for every
+  solver because it costs nothing; results are reported in passenger-meters again.
+- **CPLEX rows are license-limited, not hidden.** The free Community Edition stops at
+  1,000 variables and 1,000 constraints, so it only runs `small` (solved at the root, 0
+  nodes). A full license (IBM Academic Initiative) would fill in the other rows
+  with the same command; the job API reports the limit as a failed job with the reason.
+- Gurobi uses an academic WLS license: the license is checked out once per process, so it
+  is not in the solve times (`small` takes 0.02 s).
 - Status `optimal` means within the requested relative gap (default 0.01%).
-- **Objective scaling matters.** The objective is about $10^8$ passenger-meters. Passed to
-  HiGHS unscaled, the solver stayed at the root node and still had a 14% gap on `large`
-  after 60 s; symmetry, cut and presolve options did not help. Scaled to passenger-kilometers
-  it is optimal in about 30 s. Results are reported in passenger-meters again.
 - On `large`, wide-bodies are over-represented at the apron (33 of 85 apron flights, while
   only 22% of all flights are L): 87 L flights (avg. 89 min on ground) share 8 L-capable gates.
   That is a capacity limit of the gate mix, not a model artifact.
@@ -306,12 +342,15 @@ uv run python -m scripts.baseline
   assigned exactly once, every aircraft fits its gate, consecutive flights at a gate are at
   least `buffer` minutes apart, and the cost recomputed from scratch equals the solver's
   objective. The benchmark runs it on every solution (the "Checker" column).
-- 61 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
+- 76 pytest tests: hand-made cases with known answers (nearest gate, apron when gates run
   out, buffer boundary at exactly 15 minutes, fuller flight gets the closer gate), both
-  formulations giving the same optimum, the heuristics staying feasible and never beating
-  the MIP, the checker catching deliberately broken
-  assignments, the time-limit path, input validation, the job lifecycle through the API,
-  worker failure handling, logging and the metrics output.
+  formulations giving the same optimum, all three solvers reaching the same optimum, a
+  missing or size-limited solver failing the job with a clear reason, the heuristics staying
+  feasible and never beating the MIP, the checker catching deliberately broken assignments,
+  the time-limit path, input validation, the job lifecycle through the API, worker failure
+  handling, logging and the metrics output.
+- Tests that need Gurobi or CPLEX are skipped when the solver is not installed or licensed,
+  so CI (HiGHS only) runs 70 of them.
 - CI (GitHub Actions) runs `ruff check`, `ruff format --check`, `pytest` and `docker build`
   on every push and pull request, with the exact dependency versions from `uv.lock`.
 
@@ -392,7 +431,8 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
 | Path | What it does |
 |---|---|
 | `app/schemas.py` | Pydantic models: instance format and API request/response; the single data contract |
-| `app/model.py` | Pyomo model (both formulations), HiGHS solve, KPIs |
+| `app/model.py` | Pyomo model (both formulations), solve, KPIs |
+| `app/solvers.py` | Runs the model with HiGHS, Gurobi or CPLEX and reads back status, bound and nodes |
 | `app/heuristic.py` | Greedy + local search baseline |
 | `app/checker.py` | Independent solution checker and cost recomputation |
 | `app/jobs.py` | SQLite job store: create, claim, finish, requeue |
@@ -401,7 +441,7 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
 | `app/logging_conf.py` | JSON log formatter and `job_id` context |
 | `app/metrics.py` | Prometheus metrics text for `/metrics` |
 | `data/generate.py` | Synthetic instance generator; output in `data/instances/` |
-| `scripts/solve.py`, `scripts/benchmark.py`, `scripts/baseline.py` | Command-line solve, formulation benchmark, heuristic vs MIP |
+| `scripts/solve.py`, `scripts/benchmark.py`, `scripts/baseline.py` | Command-line solve, solver and formulation benchmark, heuristic vs MIP |
 | `tests/` | pytest suite |
 | `Dockerfile`, `docker-compose.yml` | One image, two services (`api`, `worker`) |
 | `monitoring/` | Prometheus scrape config and alert rules |
@@ -426,7 +466,6 @@ Both processes use `JOBS_DB_PATH` (default `jobs.db`).
   delay does not cascade; re-optimize during the day with a warm start from the current plan.
 - **Heuristic + MIP together**: offer the heuristic as a `method` option in the API, or pass
   its plan to the solver as a starting solution.
-- **Solver comparison**: the same model in GAMS to compare solvers.
 - **Dashboards and notifications**: a Grafana dashboard on top of Prometheus, and
   Alertmanager to send the alerts to mail or Slack.
 - **Visual output**: a Gantt chart of the gate schedule as a PNG endpoint.
