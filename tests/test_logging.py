@@ -60,10 +60,12 @@ def test_job_lifecycle_events_carry_job_id(client, db_path, capsys, restore_root
     )
 
     built = by_event["model built"]
+    assert built["solver"] == "highs"
     assert built["n_variables"] > 0 and built["n_constraints"] > 0
     assert built["build_time_s"] >= 0
 
     finished = by_event["solve finished"]
+    assert finished["solver"] == "highs" and finished["solver_version"]
     assert finished["status"] == "optimal"
     assert finished["objective"] > 0
     assert finished["mip_gap"] is not None and finished["solve_time_s"] >= 0

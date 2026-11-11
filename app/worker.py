@@ -10,9 +10,11 @@ import sqlite3
 import threading
 
 from app import jobs
+from app.checker import find_violations
 from app.logging_conf import current_job_id, setup_logging
 from app.model import compute_kpis, solve
 from app.schemas import GateAssignment, JobRequest, JobResult
+from app.solvers import SolverUnavailableError
 
 # Fixed name: under "python -m app.worker" __name__ would be "__main__".
 logger = logging.getLogger("app.worker")
@@ -41,15 +43,22 @@ def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
             "instance_name": row["instance_name"],
             "n_flights": row["n_flights"],
             "n_gates": row["n_gates"],
+            "solver": row["solver"],
         },
     )
     try:
         request = JobRequest.model_validate_json(row["request_json"])
         options = request.options
-        result = solve(request.instance, options.time_limit_s, options.mip_gap)
+        result = solve(
+            request.instance,
+            options.time_limit_s,
+            options.mip_gap,
+            solver=options.solver,
+            threads=options.threads,
+        )
 
         if result.status == "no_solution":
-            # Only possible if the time limit hits before HiGHS finds any solution.
+            # Only possible if the time limit hits before the solver finds any solution.
             error = (
                 f"no feasible solution found within the time limit of {options.time_limit_s} s "
                 f"(solver termination: {result.termination})"
@@ -65,6 +74,14 @@ def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
             logger.warning("job failed", extra={"error_type": "NoSolution", "error": error})
             return
 
+        # Never store a solution the independent checker rejects, whatever the solver.
+        violations = find_violations(request.instance, result.assignment)
+        if violations:
+            error = f"solution failed the independent check: {'; '.join(violations[:3])}"
+            jobs.mark_failed(conn, job_id, error, solver_status=result.status)
+            logger.error("job failed", extra={"error_type": "CheckFailed", "error": error})
+            return
+
         kpis = compute_kpis(request.instance, result.assignment)
         job_result = JobResult(
             job_id=job_id,
@@ -76,10 +93,12 @@ def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         jobs.mark_succeeded(
             conn,
             job_id,
+            solver_version=result.solver_version,
             solver_status=result.status,
             termination=result.termination,
             objective=result.objective,
             mip_gap=result.mip_gap,
+            nodes=result.nodes,
             solve_time_s=result.solve_time_s,
             result=job_result,
         )
@@ -87,6 +106,10 @@ def run_job(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
             "job succeeded",
             extra={"apron_count": kpis.apron_count, "solver_status": result.status},
         )
+    except SolverUnavailableError as exc:
+        # Expected (not installed, no license, size limit): fail the job with the reason.
+        jobs.mark_failed(conn, job_id, f"solver unavailable: {exc}")
+        logger.warning("job failed", extra={"error_type": "SolverUnavailable", "error": str(exc)})
     except Exception as exc:
         # Any bug or bad data must fail this job, not crash the worker.
         jobs.mark_failed(conn, job_id, f"{type(exc).__name__}: {exc}")

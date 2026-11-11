@@ -190,7 +190,7 @@ Interactive docs (Swagger UI): http://127.0.0.1:8000/docs
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
-| `POST` | `/jobs` | Submit `{"instance": ..., "options": {"time_limit_s": 60, "mip_gap": 0.0001}}`; returns `202` with `job_id` and a `Location` header |
+| `POST` | `/jobs` | Submit `{"instance": ..., "options": {"time_limit_s": 60, "mip_gap": 0.0001, "solver": "highs", "threads": null}}`; returns `202` with `job_id` and a `Location` header |
 | `GET` | `/jobs/{job_id}` | Status (`queued` / `running` / `succeeded` / `failed`), timestamps, solver status, objective, gap |
 | `GET` | `/jobs/{job_id}/result` | Assignments (`flight_id` → `gate_id` or `APRON`) and KPIs; `409` until the job has succeeded |
 | `GET` | `/jobs?limit=20` | Most recent jobs |
@@ -215,6 +215,10 @@ An instance looks like this (all times in minutes from midnight; `options` is op
   "options": {"time_limit_s": 10}
 }
 ```
+
+`solver` is `highs` (default), `gurobi` or `cplex`. Gurobi and CPLEX are optional
+(`uv sync --extra solvers`, not in the Docker image) and need a license above their free
+size limits; if a solver cannot run, the job fails with the reason in `error`.
 
 Invalid input (departure before arrival, duplicate ids, unknown fields, a gate called
 `APRON`, more than 2,000 flights, ...) is rejected with `422` before it reaches the queue.

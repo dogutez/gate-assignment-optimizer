@@ -1,4 +1,4 @@
-"""Gate assignment MIP: Pyomo formulation and HiGHS solve.
+"""Gate assignment MIP: Pyomo formulation and solve (HiGHS, Gurobi or CPLEX).
 
     min  sum_{(i,k) in FG} pax_i * walk_k * x[i,k]
        + sum_i (apron_penalty + pax_i * apron_walk_dist) * a[i]
@@ -16,10 +16,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 import pyomo.environ as pyo
-from pyomo.contrib.solver.common.results import SolutionStatus
-from pyomo.contrib.solver.solvers.highs import Highs
 
-from app.schemas import APRON, SIZE_RANK, Flight, Gate, Instance, Kpis
+from app import solvers
+from app.schemas import APRON, SIZE_RANK, Flight, Gate, Instance, Kpis, SolverName
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +32,15 @@ OBJECTIVE_SCALE = 1e-3
 
 @dataclass
 class SolveResult:
+    solver: str  # "highs", "gurobi" or "cplex"
+    solver_version: str
     status: str  # "optimal", "feasible" (stopped at a limit with a solution) or "no_solution"
     termination: str  # raw termination condition reported through Pyomo
     objective: float | None
     best_bound: float | None  # dual bound: no solution can be better than this
     mip_gap: float | None  # (objective - best_bound) / objective
     assignment: dict[str, str]  # flight id -> gate id or APRON
+    nodes: int | None  # branch-and-bound nodes explored
     n_variables: int
     n_constraints: int
     build_time_s: float
@@ -92,7 +94,11 @@ def conflict_cliques(instance: Instance) -> list[list[str]]:
     return sorted(sorted(g) for g in maximal)
 
 
-def build_model(instance: Instance, formulation: Formulation = "clique") -> pyo.ConcreteModel:
+def build_model(
+    instance: Instance,
+    formulation: Formulation = "clique",
+    objective_scale: float = OBJECTIVE_SCALE,
+) -> pyo.ConcreteModel:
     flights = {f.id: f for f in instance.flights}
     gates = {g.id: g for g in instance.gates}
     compatible_pairs = [
@@ -122,7 +128,7 @@ def build_model(instance: Instance, formulation: Formulation = "clique") -> pyo.
     # Without the pax term, apron passengers would cost nothing and the model would
     # send the fullest flights to the apron.
     m.total_cost = pyo.Objective(
-        expr=OBJECTIVE_SCALE
+        expr=objective_scale
         * (
             sum(m.pax[i] * m.walk[k] * m.x[i, k] for (i, k) in m.FG)
             + sum((m.apron_penalty + m.pax[i] * m.apron_walk) * m.a[i] for i in m.F)
@@ -190,14 +196,19 @@ def solve(
     time_limit_s: float = 60.0,
     mip_gap: float = 1e-4,
     formulation: Formulation = "clique",
+    solver: SolverName = "highs",
+    threads: int | None = None,
+    objective_scale: float = OBJECTIVE_SCALE,
 ) -> SolveResult:
+    """Build and solve. Raises solvers.SolverUnavailableError if the solver cannot run."""
     start = time.perf_counter()
-    m = build_model(instance, formulation)
+    m = build_model(instance, formulation, objective_scale)
     build_time = time.perf_counter() - start
     n_variables, n_constraints = count_variables(m), count_constraints(m)
     logger.info(
         "model built",
         extra={
+            "solver": solver,
             "formulation": formulation,
             "n_variables": n_variables,
             "n_constraints": n_constraints,
@@ -206,35 +217,29 @@ def solve(
     )
 
     start = time.perf_counter()
-    results = Highs().solve(
-        m,
-        time_limit=time_limit_s,
-        rel_gap=mip_gap,
-        load_solutions=False,  # we load them ourselves, only if a solution exists
-        raise_exception_on_nonoptimal_result=False,  # a time-limit stop is not an error
-    )
+    raw = solvers.run(m, solver, time_limit_s, mip_gap, threads)
     solve_time = time.perf_counter() - start
 
     result = SolveResult(
+        solver=solver,
+        solver_version=raw.version,
         status="no_solution",
-        termination=results.termination_condition.name,
+        termination=raw.termination,
         objective=None,
         best_bound=None,
         mip_gap=None,
         assignment={},
+        nodes=raw.nodes,
         n_variables=n_variables,
         n_constraints=n_constraints,
         build_time_s=build_time,
         solve_time_s=solve_time,
     )
-    if results.solution_status in (SolutionStatus.optimal, SolutionStatus.feasible):
-        results.solution_loader.load_vars()
-        result.status = (
-            "optimal" if results.solution_status == SolutionStatus.optimal else "feasible"
-        )
-        result.objective = results.incumbent_objective / OBJECTIVE_SCALE
-        if results.objective_bound is not None:
-            result.best_bound = results.objective_bound / OBJECTIVE_SCALE
+    if raw.has_solution:
+        result.status = "optimal" if raw.optimal else "feasible"
+        result.objective = raw.objective / objective_scale
+        if raw.best_bound is not None:
+            result.best_bound = raw.best_bound / objective_scale
             result.mip_gap = abs(result.objective - result.best_bound) / max(
                 abs(result.objective), 1e-9
             )
@@ -243,10 +248,13 @@ def solve(
     logger.info(
         "solve finished",
         extra={
+            "solver": solver,
+            "solver_version": raw.version,
             "status": result.status,
             "termination": result.termination,
             "objective": result.objective,
             "mip_gap": result.mip_gap,
+            "nodes": result.nodes,
             "solve_time_s": round(solve_time, 3),
             "time_limit_s": time_limit_s,
         },

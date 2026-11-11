@@ -14,12 +14,14 @@ from app.checker import find_violations, total_cost
 from app.heuristic import greedy, local_search
 from app.model import compute_kpis, solve
 from app.schemas import Instance
+from app.solvers import SOLVERS
 from data.generate import INSTANCES_DIR, PRESETS
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare heuristics with the MIP.")
     parser.add_argument("--time-limit", type=float, default=120.0, help="MIP seconds per solve")
+    parser.add_argument("--solver", choices=SOLVERS, default="highs", help="MIP solver")
     args = parser.parse_args()
 
     print(
@@ -39,7 +41,7 @@ def main() -> None:
         ls_solution = local_search(instance, greedy_solution)
         ls_time = greedy_time + time.perf_counter() - start  # includes the greedy start
 
-        mip = solve(instance, args.time_limit)
+        mip = solve(instance, args.time_limit, solver=args.solver)
         if mip.status == "no_solution":
             raise SystemExit(f"{name}: MIP found no solution within {args.time_limit} s")
         mip_cost = total_cost(instance, mip.assignment)
@@ -47,7 +49,11 @@ def main() -> None:
         rows = [
             ("greedy", greedy_solution, greedy_time),
             ("greedy + local search", ls_solution, ls_time),
-            (f"MIP ({mip.status})", mip.assignment, mip.build_time_s + mip.solve_time_s),
+            (
+                f"MIP {args.solver} ({mip.status})",
+                mip.assignment,
+                mip.build_time_s + mip.solve_time_s,
+            ),
         ]
         for method, assignment, seconds in rows:
             cost = total_cost(instance, assignment)

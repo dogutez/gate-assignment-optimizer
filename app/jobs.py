@@ -25,10 +25,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at    TEXT NOT NULL,      -- ISO 8601, UTC
     started_at    TEXT,
     finished_at   TEXT,
+    solver        TEXT NOT NULL DEFAULT 'highs',
+    solver_version TEXT,
     solver_status TEXT,               -- optimal / feasible / no_solution
     termination   TEXT,
     objective     REAL,
     mip_gap       REAL,
+    nodes         INTEGER,            -- branch-and-bound nodes
     solve_time_s  REAL,
     result_json   TEXT,               -- JobResult, only for succeeded jobs
     error         TEXT
@@ -49,21 +52,36 @@ def connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first version. A jobs.db created before them (e.g. on a
+# Docker volume) gets them added on startup, so old databases keep working.
+ADDED_COLUMNS = {
+    "solver": "TEXT NOT NULL DEFAULT 'highs'",
+    "solver_version": "TEXT",
+    "nodes": "INTEGER",
+}
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+    with conn:
+        for name, definition in ADDED_COLUMNS.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
 
 
 def create_job(conn: sqlite3.Connection, request: JobRequest) -> str:
     job_id = uuid.uuid4().hex
     with conn:  # commits on success, rolls back on error
         conn.execute(
-            "INSERT INTO jobs (id, status, instance_name, n_flights, n_gates, request_json, "
-            "created_at) VALUES (?, 'queued', ?, ?, ?, ?, ?)",
+            "INSERT INTO jobs (id, status, instance_name, n_flights, n_gates, solver, "
+            "request_json, created_at) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?)",
             (
                 job_id,
                 request.instance.name,
                 len(request.instance.flights),
                 len(request.instance.gates),
+                request.options.solver,
                 request.model_dump_json(),
                 now(),
             ),
@@ -117,24 +135,28 @@ def mark_succeeded(
     conn: sqlite3.Connection,
     job_id: str,
     *,
+    solver_version: str,
     solver_status: str,
     termination: str,
     objective: float,
     mip_gap: float | None,
+    nodes: int | None,
     solve_time_s: float,
     result: JobResult,
 ) -> None:
     with conn:
         conn.execute(
-            "UPDATE jobs SET status = 'succeeded', finished_at = ?, solver_status = ?, "
-            "termination = ?, objective = ?, mip_gap = ?, solve_time_s = ?, result_json = ? "
-            "WHERE id = ?",
+            "UPDATE jobs SET status = 'succeeded', finished_at = ?, solver_version = ?, "
+            "solver_status = ?, termination = ?, objective = ?, mip_gap = ?, nodes = ?, "
+            "solve_time_s = ?, result_json = ? WHERE id = ?",
             (
                 now(),
+                solver_version,
                 solver_status,
                 termination,
                 objective,
                 mip_gap,
+                nodes,
                 solve_time_s,
                 result.model_dump_json(),
                 job_id,
@@ -169,10 +191,13 @@ def to_job_info(row: sqlite3.Row) -> JobInfo:
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
+        solver=row["solver"],
+        solver_version=row["solver_version"],
         solver_status=row["solver_status"],
         termination=row["termination"],
         objective=row["objective"],
         mip_gap=row["mip_gap"],
+        nodes=row["nodes"],
         solve_time_s=row["solve_time_s"],
         error=row["error"],
     )

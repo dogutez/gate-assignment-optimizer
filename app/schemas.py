@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AircraftSize = Literal["S", "M", "L"]
+SolverName = Literal["highs", "gurobi", "cplex"]
 
 # Ordering used for the compatibility check: a flight fits a gate
 # if SIZE_RANK[aircraft_size] <= SIZE_RANK[max_size].
@@ -107,6 +108,10 @@ class SolveOptions(BaseModel):
 
     time_limit_s: float = Field(default=60, gt=0, le=3600)
     mip_gap: float = Field(default=1e-4, ge=0, le=1, description="Relative MIP gap tolerance")
+    solver: SolverName = Field(
+        default="highs", description="gurobi and cplex need the solvers extra and a license"
+    )
+    threads: int | None = Field(default=None, ge=1, le=64, description="None: solver default")
 
 
 class JobRequest(BaseModel):
@@ -134,10 +139,13 @@ class JobInfo(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    solver: str
+    solver_version: str | None
     solver_status: str | None = Field(description="optimal, feasible or no_solution")
     termination: str | None = Field(description="Raw solver termination condition")
     objective: float | None
     mip_gap: float | None
+    nodes: int | None = Field(description="Branch-and-bound nodes explored")
     solve_time_s: float | None
     error: str | None
 

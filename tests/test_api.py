@@ -61,6 +61,8 @@ def test_jobs_run_oldest_first_and_list_newest_first(client, db_path):
         (lambda b: b["instance"]["flights"][0].update(aircraft_size="XL"), "aircraft_size"),
         (lambda b: b["instance"]["gates"].append(b["instance"]["gates"][0]), "duplicate gate"),
         (lambda b: b["options"].update(time_limit_s=-1), "time_limit_s"),
+        (lambda b: b["options"].update(solver="glpk"), "solver"),
+        (lambda b: b["options"].update(threads=0), "threads"),
         (lambda b: b.update(unexpected=1), "unexpected"),
     ],
 )
@@ -96,12 +98,15 @@ def test_solver_exception_marks_job_failed(client, db_path, monkeypatch):
 def test_no_solution_within_time_limit_marks_job_failed(client, db_path, monkeypatch):
     def no_solution(*args, **kwargs):
         return SolveResult(
+            solver="highs",
+            solver_version="1.15.1",
             status="no_solution",
             termination="maxTimeLimit",
             objective=None,
             best_bound=None,
             mip_gap=None,
             assignment={},
+            nodes=0,
             n_variables=1,
             n_constraints=1,
             build_time_s=0.0,

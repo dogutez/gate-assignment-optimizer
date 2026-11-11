@@ -9,3 +9,6 @@ __pycache__/
 *.db
 *.db-*
 *.sqlite3
+
+# Solver license files (Gurobi WLS keys) must never be committed
+*.lic
